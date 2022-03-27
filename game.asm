@@ -3,7 +3,7 @@
 # CSCB58 Winter 2022 Assembly Final Project
 # University of Toronto, Scarborough
 #
-# Student: Name, Student Number, UTorID, official email
+# Student: Tony Chen, 1005994872, chento24, tonyc.chen@mail.utoronto.ca
 #
 # Bitmap Display Configuration:
 # - Unit width in pixels: 8 (update this as needed)
@@ -14,7 +14,7 @@
 #
 # Which milestones have been reached in this submission?
 # (See the assignment handout for descriptions of the milestones)
-# - Milestone 1/2/3 (choose the one the applies)
+# - Milestone 1 (choose the one the applies)
 #
 # Which approved features have been implemented for milestone 3?
 # (See the assignment handout for the list of additional features)
@@ -27,7 +27,7 @@
 # - (insert YouTube / MyMedia / other URL here). Make sure we can view it!
 #
 # Are you OK with us sharing the video with people outside course staff?
-# - yes / no / yes, and please share this project github link as well!
+# - yes, and please share this project github link as well!
 #
 # Any additional information that the TA needs to know:
 # - (write here, if any)
@@ -42,22 +42,15 @@
 .eqv	NEXT_ROW_OFFSET	0x00000100	# offset to get to the address of the next row in the frame
 
 .data
-
-Health:	.word		3
-Level:	.word		1
+Player:	.word	0x1000ad08, 0, 0	# Player state (address of top left unit of player hitbox, state (0:standing, 1:jumping, 2:falling), time in state
+Health:		.word	3
+Level:		.word	1
 
  
 .text 
 main:
-	li $t0, BASE_ADDRESS # $t0 stores the base address for display 
-	li $t1, 0xff0000   # $t1 stores the red colour code 
-	li $t2, 0x00ff00   # $t2 stores the green colour code 
-	li $t3, 0x0000ff   # $t3 stores the blue colour code 
+	li $t0, BASE_ADDRESS # $t0 stores the base address for display  
   
-	sw $t1, 0($t0)  # paint the first (top-left) unit red.  
-	sw $t2, 4($t0)  # paint the second unit on the first row green. Why $t0+4? 
-	sw $t3, 256($t0)   # paint the first unit on the second row blue. Why +256?
-	
 	jal CLEAR
 
 	# Initialize Game State
@@ -90,7 +83,465 @@ main:
 	jal DRAW_ENEMY
 	
 	jal DRAW_LEVEL1
- 
+	
+	la $s0, Player
+
+	
+game_loop:
+	# Enter the main game loop
+	
+	li $t9, 0xffff0000
+	lw $t8, 0($t9)
+	beq $t8, 1, keypress_happened	# handle user input
+	# no key press
+	j update_player_state
+	
+keypress_happened:
+	lw $t2, 4($t9)
+	beq $t2, 112, keypress_p
+	beq $t2, 119, keypress_w
+	beq $t2, 97, keypress_a
+	beq $t2, 100, keypress_d
+	j sleep_game_loop
+	
+keypress_p:
+	j END
+	
+keypress_w:
+	lw $t0, 4($s0)		# t0 = state of player character
+	
+	bne $t0, 0, sleep_game_loop	# if currently in the air, ignore jump
+	li $t0, 1		
+	sw $t0, 4($s0)		# set player state to 1 (jumping)
+	li $t0, 0		
+	sw $t0, 8($s0)		# set duration of current player state to 0
+	
+	j update_player_state
+	
+keypress_a:
+	lw $t1, 0($s0)
+	li $t2, BASE_ADDRESS
+	
+	# Determine if player can move left
+	sub $t2, $t1, $t2
+	srl $t2, $t2, 2			# t2 = unit number of players current location
+	li $t3, 64
+	div $t2, $t3
+	mfhi $t2			# t2 = current players x-coordinate
+	
+	beq $t2, $zero, update_player_state	# If current player x-coordinate = 0, then do not move left
+	
+	# If platform to the left of user, do not move left
+	li $t2, PLATFORM_COL
+	addi $t1, $t1, -4
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	
+	# If here, player can move left
+	
+	# clear all player character units
+	jal CLEAR_PLAYER
+	
+	# move the character left
+	lw $t1, 0($s0)
+	addi $t1, $t1, -4
+	sw $t1, 0($s0)
+	jal DRAW_PLAYER
+	
+	j update_player_state
+	
+keypress_d:
+	lw $t1, 0($s0)
+	li $t2, BASE_ADDRESS
+	
+	# Determine if player can move right
+	sub $t2, $t1, $t2
+	srl $t2, $t2, 2			# t2 = unit number of players current location
+	li $t3, 64
+	div $t2, $t3
+	mfhi $t2			# t2 = current players x-coordinate
+	
+	li $t3, 59
+	beq $t2, $t3, update_player_state	# If current player x-coordinate = 59, then do not move right
+	
+	# If platform to the right of user, do not move right
+	li $t2, PLATFORM_COL
+	addi $t1, $t1, 20
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	lw $t0, 0($t1)
+	beq $t0, $t2, update_player_state
+	
+	# If here, player can move right
+	
+	# clear all player character units
+	jal CLEAR_PLAYER
+	
+	# move the character right
+	lw $t1, 0($s0)
+	addi $t1, $t1, 4
+	sw $t1, 0($s0)
+	jal DRAW_PLAYER
+	
+	j update_player_state
+
+update_player_state:
+	lw $t0, 4($s0)		# t0 = player state
+	
+	# Check if player is currently in jump state
+	li $t1, 1
+	beq $t0, $t1, jump_state
+	
+	# Check if player is currently in falling state
+	li $t1, 2
+	beq $t0, $t1, fall_state
+	
+	# otherwise player currently in standing state
+	# check if player walked off platform
+	
+	# set t0 to unit below character
+	lw $t0, 0($s0)			
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+
+	li $t2, PLATFORM_COL		# t2 = platform color
+	
+	# if character is not on a platform, set player state to falling
+	lw $t3, 0($t0)
+	bne $t3, $t2, set_fall_state
+	lw $t3, 4($t0)
+	bne $t3, $t2, set_fall_state
+	lw $t3, 8($t0)
+	bne $t3, $t2, set_fall_state
+	lw $t3, 12($t0)
+	bne $t3, $t2, set_fall_state
+	lw $t3, 16($t0)
+	bne $t3, $t2, set_fall_state
+	
+	j sleep_game_loop
+jump_state:
+	# check if collision immediately above player
+	lw $t0, 0($s0)			# t0 = player location
+	li $t1, NEXT_ROW_OFFSET		# t1 = offset to shift location by 1 row
+	li $t5, PLATFORM_COL		# t5 = platform color
+	
+	sub $t4, $t0, $t1		# t4 = address of row of above player location
+	lw $t3, 0($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 4($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 8($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 12($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 16($t4)
+	beq $t3, $t5, set_fall_state
+	
+	lw $t2, 8($s0)			# t2 = duration of player in current state
+	
+	# determine speed of jump depending on duration of player in current state
+	# speed of jump becomes slower over time to imitate the effect of gravity
+	li $t3, 2
+	ble $t2, $t3, try_jump3
+	li $t3, 5
+	ble $t2, $t3, try_jump2
+	j jump1
+	
+try_jump3:
+	# try to jump up 3 units, otherwise jump up maximum number of units possible
+	
+	sub $t4, $t4, $t1		# t4 = address of 2 rows of above current player location
+	lw $t3, 0($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 4($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 8($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 12($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 16($t4)
+	beq $t3, $t5, jump1
+	
+	sub $t4, $t4, $t1		# t4 = address of 3 rows of above current player location
+	lw $t3, 0($t4)
+	beq $t3, $t5, jump2
+	lw $t3, 4($t4)
+	beq $t3, $t5, jump2
+	lw $t3, 8($t4)
+	beq $t3, $t5, jump2
+	lw $t3, 12($t4)
+	beq $t3, $t5, jump2
+	lw $t3, 16($t4)
+	beq $t3, $t5, jump2
+	
+	j jump3	# jump up 3 units
+
+
+try_jump2:
+	# try to jump up 2 units, otherwise jump up maximum number of units possible
+	sub $t4, $t4, $t1		# t4 = address of 2 rows of above current player location
+	lw $t3, 0($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 4($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 8($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 12($t4)
+	beq $t3, $t5, jump1
+	lw $t3, 16($t4)
+	beq $t3, $t5, jump1
+	
+	j jump2	# jump up 2 units
+
+jump3:
+	jal CLEAR_PLAYER
+	
+	lw $t0, 0($s0)
+	li $t1, NEXT_ROW_OFFSET
+	# set t0 = 3 units above current player location
+	sub $t0, $t0, $t1
+	sub $t0, $t0, $t1
+	sub $t0, $t0, $t1
+	
+	sw $t0, 0($s0)		# move player location 3 units up
+	jal DRAW_PLAYER
+	j end_jump
+jump2:
+	jal CLEAR_PLAYER
+	
+	lw $t0, 0($s0)
+	li $t1, NEXT_ROW_OFFSET
+	# set t0 = 2 units above current player location
+	sub $t0, $t0, $t1
+	sub $t0, $t0, $t1
+	
+	sw $t0, 0($s0)		# move player location 2 units up
+	jal DRAW_PLAYER
+	j end_jump
+jump1:
+	jal CLEAR_PLAYER
+	
+	lw $t0, 0($s0)
+	li $t1, NEXT_ROW_OFFSET
+	# set t0 = 1 unit above current player location
+	sub $t0, $t0, $t1
+	
+	sw $t0, 0($s0)		# move player location 1 unit up
+	jal DRAW_PLAYER
+	j end_jump
+end_jump:
+	lw $t0, 0($s0)
+	li $t1, NEXT_ROW_OFFSET
+	li $t5, PLATFORM_COL
+	
+	# set state to falling if collision or duration of jump = 11
+	sub $t4, $t0, $t1	# t4 = 1 unit above current player location
+	lw $t3, 0($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 4($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 8($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 12($t4)
+	beq $t3, $t5, set_fall_state
+	lw $t3, 16($t4)
+	beq $t3, $t5, set_fall_state
+	
+	lw $t0, 8($s0)
+	li $t1, 11
+	beq $t0, $t1, set_fall_state
+	
+	# increment duration of current state
+	addi $t0, $t0, 1
+	sw $t0, 8($s0)
+	
+	j sleep_game_loop
+
+set_fall_state:
+	# Set the state of the player to falling
+	li $t0, 2
+	sw $t0, 4($s0)
+	sw $zero, 8($s0)
+	
+	j sleep_game_loop
+
+fall_state:
+	# check if player standing on platform
+	
+	lw $t0, 0($s0)			# t0 = current player location
+	# set t0 to unit below character			
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+
+	li $t2, PLATFORM_COL		# t2 = platform color
+	
+	# if character is on a platform, set player state to standing
+	lw $t3, 0($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 4($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 8($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 12($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 16($t0)
+	beq $t3, $t2, set_stand_state
+	
+	lw $t1, 8($s0)			# t1 = duration of player in current state
+	
+	# determine speed of fall depending on duration of player in current state
+	# speed of falling becomes faster over time to imitate the effect of gravity
+	li $t3, 7
+	ble $t1, $t3, fall1
+
+try_fall2:
+	# try to fall 2 units, otherwise fall only 1 unit
+	
+	addi $t0, $t0, NEXT_ROW_OFFSET	# t0 = address of 2 units below characters feet
+	lw $t3, 0($t0)
+	beq $t3, $t2, fall1
+	lw $t3, 4($t0)
+	beq $t3, $t2, fall1
+	lw $t3, 8($t0)
+	beq $t3, $t2, fall1
+	lw $t3, 12($t0)
+	beq $t3, $t2, fall1
+	lw $t3, 16($t0)
+	beq $t3, $t2, fall1
+	
+fall2:
+	jal CLEAR_PLAYER
+	
+	lw $t0, 0($s0)
+	# set t0 to 2 units below current player location			
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t0, 0($s0)
+	
+	jal DRAW_PLAYER
+	j end_fall
+
+fall1:
+	jal CLEAR_PLAYER
+	
+	lw $t0, 0($s0)
+	# set t0 to 1 unit below current player location			
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t0, 0($s0)
+	
+	jal DRAW_PLAYER
+	j end_fall
+	
+end_fall:
+	lw $t0, 0($s0)			# t0 = current player location
+	# set t0 to unit below character			
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+
+	li $t2, PLATFORM_COL		# t2 = platform color
+	
+	# if character is on a platform, set player state to standing
+	lw $t3, 0($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 4($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 8($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 12($t0)
+	beq $t3, $t2, set_stand_state
+	lw $t3, 16($t0)
+	beq $t3, $t2, set_stand_state
+	
+	# increment duration of current state
+	lw $t0, 8($s0)
+	addi $t0, $t0, 1
+	sw $t0, 8($s0)
+	
+	j sleep_game_loop
+	
+set_stand_state:
+	# set the state of the player to standing
+	sw $zero, 4($s0)
+	sw $zero, 8($s0)
+	
+	j sleep_game_loop
+
+sleep_game_loop:
+	# Sleep and jump back to start of the main game loop
+	li $v0, 32
+	li $a0, SLEEP_TIME
+	syscall
+	j game_loop
+
+
+END:
 	li $v0, 10 # terminate the program gracefully 
 	syscall 
 
@@ -273,7 +724,10 @@ DRAW_PLAYER:
 	li $t2, 0x00795548	# t2 = tertiary player color (clothes)
 	li $t3, 0x00ffc107	# t3 = glove color
 	
-	li $t4,	0x1000ad08	# t4 = top left unit of player hitbox
+	la $t4, Player	
+	lw $t4, 0($t4)		# t4 = top left unit of player hitbox
+	
+	#li $t4,	0x1000ad08	# t4 = top left unit of player hitbox
 	sw $t0, 4($t4)
 	sw $t0, 8($t4)
 	sw $t0, 12($t4)
@@ -316,6 +770,57 @@ DRAW_PLAYER:
 	sw $t2, 12($t4)
 	
 	jr $ra
+	
+# ------------ Clear Player Character ------------ #
+CLEAR_PLAYER:
+	li $t0, BACKGROUND_COL
+	la $t1, Player
+	lw $t1, 0($t1)		# t1 = current player loc
+
+	# reset all player units
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 12($t1)
+	
+	jr $ra
+
 	
 # ------------ Draw Enemy Character ------------ #
 DRAW_ENEMY:
@@ -387,6 +892,73 @@ DRAW_STONE:
 DRAW_LEVEL1:
 	li $t0, PLATFORM_COL	# t0 = platform color
 	li $t2, PLATFORM_WIDTH	# t2 = platform width
+	
+	# Draw the ceiling
+	li $t1, BASE_ADDRESS
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	sw $t0, 20($t1)
+	sw $t0, 24($t1)
+	sw $t0, 28($t1)
+	sw $t0, 32($t1)
+	sw $t0, 36($t1)
+	sw $t0, 40($t1)
+	sw $t0, 44($t1)
+	sw $t0, 48($t1)
+	sw $t0, 52($t1)
+	sw $t0, 56($t1)
+	sw $t0, 60($t1)
+	sw $t0, 64($t1)
+	sw $t0, 68($t1)
+	sw $t0, 72($t1)
+	sw $t0, 76($t1)
+	sw $t0, 80($t1)
+	sw $t0, 84($t1)
+	sw $t0, 88($t1)
+	sw $t0, 92($t1)
+	sw $t0, 96($t1)
+	sw $t0, 100($t1)
+	sw $t0, 104($t1)
+	sw $t0, 108($t1)
+	sw $t0, 112($t1)
+	sw $t0, 116($t1)
+	sw $t0, 120($t1)
+	sw $t0, 124($t1)
+	sw $t0, 128($t1)
+	sw $t0, 132($t1)
+	sw $t0, 136($t1)
+	sw $t0, 140($t1)
+	sw $t0, 144($t1)
+	sw $t0, 148($t1)
+	sw $t0, 152($t1)
+	sw $t0, 156($t1)
+	sw $t0, 160($t1)
+	sw $t0, 164($t1)
+	sw $t0, 168($t1)
+	sw $t0, 172($t1)
+	sw $t0, 176($t1)
+	sw $t0, 180($t1)
+	sw $t0, 184($t1)
+	sw $t0, 188($t1)
+	sw $t0, 192($t1)
+	sw $t0, 196($t1)
+	sw $t0, 200($t1)
+	sw $t0, 204($t1)
+	sw $t0, 208($t1)
+	sw $t0, 212($t1)
+	sw $t0, 216($t1)
+	sw $t0, 220($t1)
+	sw $t0, 224($t1)
+	sw $t0, 228($t1)
+	sw $t0, 232($t1)
+	sw $t0, 236($t1)
+	sw $t0, 240($t1)
+	sw $t0, 244($t1)
+	sw $t0, 248($t1)
+	sw $t0, 252($t1)
 	
 	# Draw the first platform in level 1
 	li $t1, 0x1000b600	# address of top left corner of 1st platform (x: 0, y: 54)
