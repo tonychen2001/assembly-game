@@ -14,7 +14,7 @@
 #
 # Which milestones have been reached in this submission?
 # (See the assignment handout for descriptions of the milestones)
-# - Milestone 1 (choose the one the applies)
+# - Milestone 2 (choose the one the applies)
 #
 # Which approved features have been implemented for milestone 3?
 # (See the assignment handout for the list of additional features)
@@ -41,59 +41,77 @@
 .eqv	PLATFORM_WIDTH	3
 .eqv	NEXT_ROW_OFFSET	0x00000100	# offset to get to the address of the next row in the frame
 
+.eqv	PURPLE_STONE1	0x00d400f9	# Main color of purple stone
+.eqv	PURPLE_STONE2	0x00e980fc	# Secondary color of purple stone
+.eqv	PURPLE_STONE3	0x00f1befa	# Tertiary color of purple stone
+.eqv	PURPLE_LOCATION	0x1000afc8	# Location of purple stone (x: 50, y:47)
+.eqv	BLUE_STONE1	0x00304ffe	# Main color of blue stone
+.eqv	BLUE_STONE2	0x00859bff	# Secondary color of blue stone
+.eqv	BLUE_STONE3	0x00bbc6fc	# Tertiary color of blue stone
+.eqv	BLUE_LOCATION	0x10008be4	# Location of blue stone (x: 57, y:11)
+.eqv	COL_STONE_LOC	0x1000ba04	# Location of collected stones
+
+
 .data
-Player:	.word	0x1000ad08, 0, 0	# Player state (address of top left unit of player hitbox, state (0:standing, 1:jumping, 2:falling), time in state
-Health:		.word	3
+
+# Player info array: 
+# [0]: address of top left unit of player hitbox
+# [1]: state (0: standing, 1: jumping, 2: falling)
+# [2]: duration of current state
+# [3]: health (0 - 3)
+# [4]: hurt (0: normal, >0: recently hit)
+Player:		.word	0x1000ad08, 0, 0, 3, 0
 Level:		.word	1
 
- 
 .text 
 main:
-	li $t0, BASE_ADDRESS # $t0 stores the base address for display  
-  
-	jal CLEAR
-
 	# Initialize Game State
-	
+init_game:
+	jal CLEAR
 	# init level
 	li $t0, 1
 	la $t1, Level
 	sw $t0, 0($t1)
-	# init health
+	
+	# init player
+	la $s0, Player
+	li $t0, 0x1000ad08
+	sw $t0, 0($s0)		# set initial player location in lvl 1
+	sw $zero, 4($s0)	# set initial player state to standing
+	sw $zero, 8($s0)	# set initial duration of current player state to 0
 	li $t0, 3
-	la $t1, Health
-	sw $t0, 0($t1)
+	sw $t0, 12($s0)		# set initial health of player to 3
+	sw $zero, 16($s0)	# set hurt to 0
 	
 	jal DRAW_HEALTH
 	
 	jal DRAW_PLAYER
 	
-	li $a0, 0x00d400f9	# pass primary color argument
-	li $a1, 0x00e980fc	# pass secondary color argument
-	li $a2, 0x00f1befa	# pass tertiary color argument
-	li $a3, 0x1000afc8	# pass address of top left corner of stone hitbox (x: 50, y:47)
+	li $a0, PURPLE_STONE1	# pass primary color argument
+	li $a1, PURPLE_STONE2	# pass secondary color argument
+	li $a2, PURPLE_STONE3	# pass tertiary color argument
+	li $a3, PURPLE_LOCATION	# pass address of top left corner of stone hitbox (x: 50, y:47)
 	jal DRAW_STONE
 	
-	li $a0, 0x00304ffe	# pass primary color argument
-	li $a1, 0x00859bff	# pass secondary color argument
-	li $a2, 0x00bbc6fc	# pass tertiary color argument
-	li $a3, 0x10008be4	# pass address of top left corner of stone hitbox (x: 50, y:47)
+	li $a0, BLUE_STONE1	# pass primary color argument
+	li $a1, BLUE_STONE2	# pass secondary color argument
+	li $a2, BLUE_STONE3	# pass tertiary color argument
+	li $a3, BLUE_LOCATION	# pass address of top left corner of stone hitbox (x: 57, y:11)
 	jal DRAW_STONE
 	
 	jal DRAW_ENEMY
 	
 	jal DRAW_LEVEL1
-	
-	la $s0, Player
 
-	
-game_loop:
 	# Enter the main game loop
+game_loop:
+	# clear all player character units
+	jal CLEAR_PLAYER
 	
 	li $t9, 0xffff0000
 	lw $t8, 0($t9)
 	beq $t8, 1, keypress_happened	# handle user input
-	# no key press
+	# otherwise, no key press
 	j update_player_state
 	
 keypress_happened:
@@ -102,19 +120,20 @@ keypress_happened:
 	beq $t2, 119, keypress_w
 	beq $t2, 97, keypress_a
 	beq $t2, 100, keypress_d
-	j sleep_game_loop
+	j update_player_state
 	
 keypress_p:
-	j END
+	# restart the game
+	j init_game
 	
 keypress_w:
-	lw $t0, 4($s0)		# t0 = state of player character
+	lw $t0, 4($s0)			# t0 = state of player character
 	
-	bne $t0, 0, sleep_game_loop	# if currently in the air, ignore jump
+	bne $t0, 0, update_player_state	# if currently in the air, ignore jump
 	li $t0, 1		
-	sw $t0, 4($s0)		# set player state to 1 (jumping)
+	sw $t0, 4($s0)			# set player state to 1 (jumping)
 	li $t0, 0		
-	sw $t0, 8($s0)		# set duration of current player state to 0
+	sw $t0, 8($s0)			# set duration of current player state to 0
 	
 	j update_player_state
 	
@@ -164,13 +183,13 @@ keypress_a:
 	# If here, player can move left
 	
 	# clear all player character units
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	# move the character left
 	lw $t1, 0($s0)
 	addi $t1, $t1, -4
 	sw $t1, 0($s0)
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	
 	j update_player_state
 	
@@ -221,13 +240,13 @@ keypress_d:
 	# If here, player can move right
 	
 	# clear all player character units
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	# move the character right
 	lw $t1, 0($s0)
 	addi $t1, $t1, 4
 	sw $t1, 0($s0)
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	
 	j update_player_state
 
@@ -243,8 +262,8 @@ update_player_state:
 	beq $t0, $t1, fall_state
 	
 	# otherwise player currently in standing state
-	# check if player walked off platform
 	
+	# check if player walked off platform
 	# set t0 to unit below character
 	lw $t0, 0($s0)			
 	addi $t0, $t0, NEXT_ROW_OFFSET
@@ -259,19 +278,19 @@ update_player_state:
 
 	li $t2, PLATFORM_COL		# t2 = platform color
 	
-	# if character is not on a platform, set player state to falling
+	# if character is on a platform, stay in standing state
 	lw $t3, 0($t0)
-	bne $t3, $t2, set_fall_state
+	beq $t3, $t2, check_collision
 	lw $t3, 4($t0)
-	bne $t3, $t2, set_fall_state
+	beq $t3, $t2, check_collision
 	lw $t3, 8($t0)
-	bne $t3, $t2, set_fall_state
+	beq $t3, $t2, check_collision
 	lw $t3, 12($t0)
-	bne $t3, $t2, set_fall_state
+	beq $t3, $t2, check_collision
 	lw $t3, 16($t0)
-	bne $t3, $t2, set_fall_state
-	
-	j sleep_game_loop
+	beq $t3, $t2, check_collision
+	# otherwise character not on a platform, then set to falling state
+	j set_fall_state
 jump_state:
 	# check if collision immediately above player
 	lw $t0, 0($s0)			# t0 = player location
@@ -347,7 +366,7 @@ try_jump2:
 	j jump2	# jump up 2 units
 
 jump3:
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	li $t1, NEXT_ROW_OFFSET
@@ -357,10 +376,10 @@ jump3:
 	sub $t0, $t0, $t1
 	
 	sw $t0, 0($s0)		# move player location 3 units up
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	j end_jump
 jump2:
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	li $t1, NEXT_ROW_OFFSET
@@ -369,10 +388,10 @@ jump2:
 	sub $t0, $t0, $t1
 	
 	sw $t0, 0($s0)		# move player location 2 units up
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	j end_jump
 jump1:
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	li $t1, NEXT_ROW_OFFSET
@@ -380,7 +399,7 @@ jump1:
 	sub $t0, $t0, $t1
 	
 	sw $t0, 0($s0)		# move player location 1 unit up
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	j end_jump
 end_jump:
 	lw $t0, 0($s0)
@@ -408,7 +427,7 @@ end_jump:
 	addi $t0, $t0, 1
 	sw $t0, 8($s0)
 	
-	j sleep_game_loop
+	j check_collision
 
 set_fall_state:
 	# Set the state of the player to falling
@@ -416,7 +435,7 @@ set_fall_state:
 	sw $t0, 4($s0)
 	sw $zero, 8($s0)
 	
-	j sleep_game_loop
+	j check_collision
 
 fall_state:
 	# check if player standing on platform
@@ -470,7 +489,7 @@ try_fall2:
 	beq $t3, $t2, fall1
 	
 fall2:
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	# set t0 to 2 units below current player location			
@@ -478,18 +497,18 @@ fall2:
 	addi $t0, $t0, NEXT_ROW_OFFSET
 	sw $t0, 0($s0)
 	
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	j end_fall
 
 fall1:
-	jal CLEAR_PLAYER
+	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	# set t0 to 1 unit below current player location			
 	addi $t0, $t0, NEXT_ROW_OFFSET
 	sw $t0, 0($s0)
 	
-	jal DRAW_PLAYER
+	#jal DRAW_PLAYER
 	j end_fall
 	
 end_fall:
@@ -524,16 +543,187 @@ end_fall:
 	addi $t0, $t0, 1
 	sw $t0, 8($s0)
 	
-	j sleep_game_loop
+	j check_collision
 	
 set_stand_state:
 	# set the state of the player to standing
 	sw $zero, 4($s0)
 	sw $zero, 8($s0)
 	
+	j check_collision
+
+check_collision:
+	# Check for player collision with various objects and respond accordingly
+	lw $t0, 0($s0)
+	
+	li $t1, PURPLE_STONE1
+	li $t2, BLUE_STONE1
+	#li $t3, BLUE_STONE1
+	#li $t4, BLUE_STONE1
+	#li $t5, BLUE_STONE1
+	#li $t6, BLUE_STONE1
+	li $t7, 0x00ff1745	# t7 = enemy color
+	
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 4($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 8($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 12($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	lw $t9, 0($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 4($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 8($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 12($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	lw $t9, 16($t0)
+	beq $t9, $t1, collect_purple
+	beq $t9, $t2, collect_blue
+	beq $t9, $t7, enemy_collision
+	
+	j sleep_game_loop
+	
+collect_purple:
+	# Player collected the purple stone so move it to the collected bar
+	li $a0, PURPLE_LOCATION
+	jal CLEAR_STONE
+	
+	li $a0, PURPLE_STONE1
+	li $a1, PURPLE_STONE2
+	li $a2, PURPLE_STONE3
+	li $a3, COL_STONE_LOC
+	
+	jal DRAW_STONE
+	
+	j sleep_game_loop
+
+collect_blue:
+	# Player collected the blue stone so move it to the collected bar
+	li $a0, BLUE_LOCATION
+	jal CLEAR_STONE
+	
+	li $a0, BLUE_STONE1
+	li $a1, BLUE_STONE2
+	li $a2, BLUE_STONE3
+	li $a3, COL_STONE_LOC
+	addi $a3, $a3, 16
+	
+	jal DRAW_STONE
+	
+	j sleep_game_loop
+
+enemy_collision:
+	# Collision with enemy drops health by 2 hearts
+	
+	# lower player health by 2
+	lw $t0, 12($s0)
+	addi $t0, $t0, -2
+	sw $t0, 12($s0)
+	
+	# TODO: Check health and end game if necessary
+	
+	jal CLEAR_HEALTH
+	jal DRAW_HEALTH
+	
+	
+	# set player hurt indicator to 10 (player will be hurt for 10 cycles)
+	li $t0, 10
+	sw $t0, 16($s0)
+	
 	j sleep_game_loop
 
 sleep_game_loop:
+	# Draw the player at the current location
+	jal DRAW_PLAYER
+	
 	# Sleep and jump back to start of the main game loop
 	li $v0, 32
 	li $a0, SLEEP_TIME
@@ -632,7 +822,8 @@ DRAW_HEALTH:
 	li $t2, 0x00fcabc7		# t3 = tertiary health color
 	
 	# store the current health in t4
-	la $t4, Health
+	la $t4, Player
+	addi $t4, $t4, 12
 	lw $t4, 0($t4)
 	
 	li $t5, 1
@@ -716,18 +907,104 @@ DRAW_HEALTH:
 END_HEALTH:
 	jr $ra
 
+# ------------ Clear Health Indicator ------------ #
+CLEAR_HEALTH:
+	li $t0, BACKGROUND_COL		# t0 = primary health color
+	
+	# Clear first heart
+	li $t3, 0x1000bab8		# address of unit (x: 45, 58)
+	sw $t0, 4($t3)
+	sw $t0, 12($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 0($t3)
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	sw $t0, 16($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 0($t3)
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	sw $t0, 16($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 8($t3)
+	
+	# Clear second heart
+	li $t3, 0x1000bad0		# address of unit (x: 51, 58)
+	sw $t0, 4($t3)
+	sw $t0, 12($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 0($t3)
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	sw $t0, 16($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 0($t3)
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	sw $t0, 16($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 8($t3)
+	
+	# Clear third heart
+	li $t3, 0x1000bae8		# address of unit (x: 57, 58)
+	sw $t0, 4($t3)
+	sw $t0, 12($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 0($t3)
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	sw $t0, 16($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 0($t3)
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	sw $t0, 16($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 4($t3)
+	sw $t0, 8($t3)
+	sw $t0, 12($t3)
+	addi $t3, $t3, NEXT_ROW_OFFSET	# jump to next row
+	sw $t0, 8($t3)
+	
 
 # ------------ Draw Player Character ------------ #
 DRAW_PLAYER:
-	li $t0, 0x009675cd	# t0 = primary player color (skin)
-	li $t1, 0x00ffeb3b	# t1 = secondary player color (armour)
-	li $t2, 0x00795548	# t2 = tertiary player color (clothes)
-	li $t3, 0x00ffc107	# t3 = glove color
+
+	la $t4, Player
+	lw $t5, 16($t4)				# t5 = player hurt indicator
+	bne $t5, $zero, draw_player_hurt	# if player hurt, use hurt skin color
+	# otherwise, player not hurt so use normal skin color
+	li $t0, 0x009675cd			# t0 = primary normal player color (skin)
+	j draw_player_end
 	
-	la $t4, Player	
-	lw $t4, 0($t4)		# t4 = top left unit of player hitbox
+draw_player_hurt:
+	li $t0, 0x00c2185c			# t0 = primary hurt player color (skin)
+	# decrement the player hurt indicator
+	addi $t5, $t5, -1
+	sw $t5, 16($t4)
+
+draw_player_end:	
 	
-	#li $t4,	0x1000ad08	# t4 = top left unit of player hitbox
+	li $t1, 0x00ffeb3b			# t1 = secondary player color (armour)
+	li $t2, 0x00795548			# t2 = tertiary player color (clothes)
+	li $t3, 0x00ffc107			# t3 = glove color
+	
+	lw $t4, 0($t4)				# t4 = top left unit of player hitbox
+	
 	sw $t0, 4($t4)
 	sw $t0, 8($t4)
 	sw $t0, 12($t4)
@@ -770,6 +1047,7 @@ DRAW_PLAYER:
 	sw $t2, 12($t4)
 	
 	jr $ra
+	
 	
 # ------------ Clear Player Character ------------ #
 CLEAR_PLAYER:
@@ -866,8 +1144,8 @@ DRAW_ENEMY:
 DRAW_STONE:
 	move $t0, $a0	# t0 = stone primary color
 	move $t1, $a1	# t1 = stone secondary color
-	move $t2, $a2	#
-	move $t3, $a3
+	move $t2, $a2	# t2 = stone teriary color
+	move $t3, $a3	# t3 = top left corner of stone
 	
 	sw $t0, 4($t3)
 	addi $t3, $t3, NEXT_ROW_OFFSET
@@ -884,6 +1162,30 @@ DRAW_STONE:
 	sw $t0, 8($t3)
 	addi $t3, $t3, NEXT_ROW_OFFSET
 	sw $t0, 4($t3)
+	
+	jr $ra
+	
+# ------------ Clear Stone Pickups ------------ #
+	# a0 = top left corner of stone
+CLEAR_STONE:
+	move $t0, $a0	# t0 = address top left corner of stone
+	li $t1, BACKGROUND_COL
+	
+	sw $t1, 4($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 4($t0)
 	
 	jr $ra
 	
