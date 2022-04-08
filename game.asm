@@ -14,7 +14,7 @@
 #
 # Which milestones have been reached in this submission?
 # (See the assignment handout for descriptions of the milestones)
-# - Milestone 2 (choose the one the applies)
+# - Milestone 3 (choose the one the applies)
 #
 # Which approved features have been implemented for milestone 3?
 # (See the assignment handout for the list of additional features)
@@ -44,12 +44,14 @@
 .eqv	PURPLE_STONE1	0x00d400f9	# Main color of purple stone
 .eqv	PURPLE_STONE2	0x00e980fc	# Secondary color of purple stone
 .eqv	PURPLE_STONE3	0x00f1befa	# Tertiary color of purple stone
-.eqv	PURPLE_LOCATION	0x1000afc8	# Location of purple stone (x: 50, y:47)
+.eqv	PURPLE_LOCATION	0x1000afa0	# Location of purple stone (x: 50, y:47)
 .eqv	BLUE_STONE1	0x00304ffe	# Main color of blue stone
 .eqv	BLUE_STONE2	0x00859bff	# Secondary color of blue stone
 .eqv	BLUE_STONE3	0x00bbc6fc	# Tertiary color of blue stone
 .eqv	BLUE_LOCATION	0x10008be4	# Location of blue stone (x: 57, y:11)
 .eqv	COL_STONE_LOC	0x1000ba04	# Location of collected stones
+
+.eqv	ENEMY_COL_1	0x00ff1745
 
 
 .data
@@ -60,7 +62,16 @@
 # [2]: duration of current state
 # [3]: health (0 - 3)
 # [4]: hurt (0: normal, >0: recently hit)
-Player:		.word	0x1000ad08, 0, 0, 3, 0
+# [5]: player direction (0: left, 1: right)
+# [6]: address of player bullet
+# [7]: player bullet indicator (0: no bullet, 1: active bullet left, 2: active bullet right)
+Player:		.word	0x1000ad08, 0, 0, 3, 0, 1, 0, 0
+
+# Enemies info array:
+# [0]: address of top left unit of enemy hitbox
+# [1]: life indicator (0: dead, 1: alive)
+# [2]: enemy primary color
+Enemies:	.word	0, 0, ENEMY_COL_1
 Level:		.word	1
 
 .text 
@@ -73,6 +84,16 @@ init_game:
 	la $t1, Level
 	sw $t0, 0($t1)
 	
+	# init enemies
+	la $s1, Enemies
+	li $t0, 0x10009d08
+	sw $t0, 0($s1)		# set initial enemy location in lvl 1
+	li $t0, 1
+	sw $t0, 4($s1)		# set initial enemy life indicator
+	li $t0, ENEMY_COL_1
+	sw $t0, 8($s1)		# set enemy 1 primary color
+	
+	
 	# init player
 	la $s0, Player
 	li $t0, 0x1000ad08
@@ -82,6 +103,9 @@ init_game:
 	li $t0, 3
 	sw $t0, 12($s0)		# set initial health of player to 3
 	sw $zero, 16($s0)	# set hurt to 0
+	li $t0, 1
+	sw $t0, 20($s0)		# set players initial direction to right
+	sw $zero, 28($s0)	# set player bullet to inactive
 	
 	jal DRAW_HEALTH
 	
@@ -104,22 +128,47 @@ init_game:
 	jal DRAW_LEVEL1
 
 	# Enter the main game loop
+	# - If no health, then do nothing unless user resets the game by pressing p. Otherwise:
+	# - Erase objects from their old position on the screen
+	# - Check for keyboard input
+	# - Update player state (jumping, falling, or standing)
+	# - Update player bullet state
+	# - Check player collision with enemies, pickups
+	# - Draw objects in their new position on the screen
+	# - Sleep
 game_loop:
-	# clear all player character units
-	jal CLEAR_PLAYER
-	
 	li $t9, 0xffff0000
 	lw $t8, 0($t9)
 	beq $t8, 1, keypress_happened	# handle user input
-	# otherwise, no key press
+	
+	# otherwise, no key press. 
+	# If player has no health, jump to end of loop
+	lw $t0, 12($s0)
+	blez $t0, sleep_game_loop
+	
+	# clear all player character units
+	jal CLEAR_PLAYER
+	jal CLEAR_PLAYER_BULLET
+	
+	# otherwise, player has health so continue normally
 	j update_player_state
 	
 keypress_happened:
-	lw $t2, 4($t9)
-	beq $t2, 112, keypress_p
-	beq $t2, 119, keypress_w
-	beq $t2, 97, keypress_a
-	beq $t2, 100, keypress_d
+	lw $s7, 4($t9)
+	beq $s7, 112, keypress_p
+	
+	# If player has no health, jump to end of loop
+	lw $t0, 12($s0)
+	blez $t0, sleep_game_loop
+	
+	# clear all player character units
+	jal CLEAR_PLAYER
+	jal CLEAR_PLAYER_BULLET
+	
+	beq $s7, 119, keypress_w
+	beq $s7, 97, keypress_a
+	beq $s7, 100, keypress_d
+	beq $s7, 32, keypress_space
 	j update_player_state
 	
 keypress_p:
@@ -138,6 +187,9 @@ keypress_w:
 	j update_player_state
 	
 keypress_a:
+	# set player direction to left
+	sw $zero, 20($s0)
+	
 	lw $t1, 0($s0)
 	li $t2, BASE_ADDRESS
 	
@@ -182,18 +234,18 @@ keypress_a:
 	
 	# If here, player can move left
 	
-	# clear all player character units
-	#jal CLEAR_PLAYER
-	
 	# move the character left
 	lw $t1, 0($s0)
 	addi $t1, $t1, -4
 	sw $t1, 0($s0)
-	#jal DRAW_PLAYER
 	
 	j update_player_state
 	
 keypress_d:
+	# set player direction to right
+	li $t0, 1
+	sw $t0, 20($s0)
+
 	lw $t1, 0($s0)
 	li $t2, BASE_ADDRESS
 	
@@ -239,15 +291,40 @@ keypress_d:
 	
 	# If here, player can move right
 	
-	# clear all player character units
-	#jal CLEAR_PLAYER
-	
 	# move the character right
 	lw $t1, 0($s0)
 	addi $t1, $t1, 4
 	sw $t1, 0($s0)
-	#jal DRAW_PLAYER
 	
+	j update_player_state
+	
+keypress_space:
+	# shoot bullet if no active bullet
+	lw $t0, 28($s0)
+	bgtz $t0, keypress_space_end
+	
+	lw $t2, 0($s0)
+	addi $t2, $t2, NEXT_ROW_OFFSET
+	addi $t2, $t2, NEXT_ROW_OFFSET
+	addi $t2, $t2, NEXT_ROW_OFFSET
+	addi $t2, $t2, NEXT_ROW_OFFSET	# t2 = address of left glove
+	
+	# determine direction of bullet
+	lw $t0, 20($s0)
+	beqz $t0, shoot_left	# shoot left if player looking left
+shoot_right:
+	# set address of bullet and indicate active bullet firing right	
+	addi $t2, $t2, 16		# t2 = address of right glove
+	li $t1, 2
+	sw $t2, 24($s0)
+	sw $t1, 28($s0)
+	j keypress_space_end
+shoot_left:
+	# set address of bullet and indicate active bullet firing left
+	li $t1, 1
+	sw $t2, 24($s0)
+	sw $t1, 28($s0)
+keypress_space_end:
 	j update_player_state
 
 update_player_state:
@@ -280,15 +357,15 @@ update_player_state:
 	
 	# if character is on a platform, stay in standing state
 	lw $t3, 0($t0)
-	beq $t3, $t2, check_collision
+	beq $t3, $t2, end_update_player_state
 	lw $t3, 4($t0)
-	beq $t3, $t2, check_collision
+	beq $t3, $t2, end_update_player_state
 	lw $t3, 8($t0)
-	beq $t3, $t2, check_collision
+	beq $t3, $t2, end_update_player_state
 	lw $t3, 12($t0)
-	beq $t3, $t2, check_collision
+	beq $t3, $t2, end_update_player_state
 	lw $t3, 16($t0)
-	beq $t3, $t2, check_collision
+	beq $t3, $t2, end_update_player_state
 	# otherwise character not on a platform, then set to falling state
 	j set_fall_state
 jump_state:
@@ -366,7 +443,6 @@ try_jump2:
 	j jump2	# jump up 2 units
 
 jump3:
-	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	li $t1, NEXT_ROW_OFFSET
@@ -376,10 +452,9 @@ jump3:
 	sub $t0, $t0, $t1
 	
 	sw $t0, 0($s0)		# move player location 3 units up
-	#jal DRAW_PLAYER
+
 	j end_jump
 jump2:
-	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	li $t1, NEXT_ROW_OFFSET
@@ -388,10 +463,9 @@ jump2:
 	sub $t0, $t0, $t1
 	
 	sw $t0, 0($s0)		# move player location 2 units up
-	#jal DRAW_PLAYER
+
 	j end_jump
 jump1:
-	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	li $t1, NEXT_ROW_OFFSET
@@ -399,7 +473,7 @@ jump1:
 	sub $t0, $t0, $t1
 	
 	sw $t0, 0($s0)		# move player location 1 unit up
-	#jal DRAW_PLAYER
+
 	j end_jump
 end_jump:
 	lw $t0, 0($s0)
@@ -427,7 +501,7 @@ end_jump:
 	addi $t0, $t0, 1
 	sw $t0, 8($s0)
 	
-	j check_collision
+	j end_update_player_state
 
 set_fall_state:
 	# Set the state of the player to falling
@@ -435,7 +509,7 @@ set_fall_state:
 	sw $t0, 4($s0)
 	sw $zero, 8($s0)
 	
-	j check_collision
+	j end_update_player_state
 
 fall_state:
 	# check if player standing on platform
@@ -489,7 +563,6 @@ try_fall2:
 	beq $t3, $t2, fall1
 	
 fall2:
-	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	# set t0 to 2 units below current player location			
@@ -497,18 +570,15 @@ fall2:
 	addi $t0, $t0, NEXT_ROW_OFFSET
 	sw $t0, 0($s0)
 	
-	#jal DRAW_PLAYER
 	j end_fall
 
 fall1:
-	#jal CLEAR_PLAYER
 	
 	lw $t0, 0($s0)
 	# set t0 to 1 unit below current player location			
 	addi $t0, $t0, NEXT_ROW_OFFSET
 	sw $t0, 0($s0)
 	
-	#jal DRAW_PLAYER
 	j end_fall
 	
 end_fall:
@@ -543,26 +613,87 @@ end_fall:
 	addi $t0, $t0, 1
 	sw $t0, 8($s0)
 	
-	j check_collision
+	j end_update_player_state
 	
 set_stand_state:
 	# set the state of the player to standing
 	sw $zero, 4($s0)
 	sw $zero, 8($s0)
 	
-	j check_collision
+	j end_update_player_state
+	
+end_update_player_state:
+	j update_bullets
+	
+update_bullets:
+	lw $t0, 28($s0)
+	li $t1, 1
+	
+	beqz $t0, update_bullets_end	# if no active bullet, go to next step in the game loop
+	lw $t2, 24($s0)			# t2 = address of bullet
+	
+	# get x-coordinate of bullet
+	li $t3, BASE_ADDRESS
+	sub $t3, $t2, $t3
+	srl $t3, $t3, 2
+	li $t4, 64
+	div $t3, $t4
+	mfhi $t3			# t3 = current bullets x-coordinate
+	
+	beq $t0, $t1, move_bullet_left
+	
+	# otherwise, active bullet moving right so move the bullet right
+	li $t4, 63
+	bge $t3, $t4, deactivate_bullet	# if current bullet is going to go off screen, then deactivate bullet
+	addi $t2, $t2, 4
+	sw $t2, 24($s0)			# set bullet location 1 unit to the right
+	j update_bullets_end
 
-check_collision:
+move_bullet_left:
+	blez $t3, deactivate_bullet	# if current bullet is going to go off screen, then deactivate bullet
+	addi $t2, $t2, -4
+	sw $t2, 24($s0)			# set bullet location 1 unit to the left
+	j update_bullets_end
+	
+deactivate_bullet:
+	sw $zero, 28($s0)
+update_bullets_end:
+	j check_player_bullet
+
+check_player_bullet:
+	lw $t0, 28($s0)
+	beqz $t0, check_player_bullet_end	# if no active bullet, jump to next stage of loop
+	
+	# Check for player bullet collision with various objects and respond accordingly
+	lw $t0, 24($s0)
+	
+	li $t1, PURPLE_STONE1
+	li $t2, BLUE_STONE1
+	li $t3, PLATFORM_COL
+
+	li $t7, ENEMY_COL_1	# t7 = enemy color
+	
+	lw $t9, 0($t0)
+	beq $t9, $t1, deactivate_bullet_collision
+	beq $t9, $t2, deactivate_bullet_collision
+	beq $t9, $t3, deactivate_bullet_collision
+	beq $t9, $t7, hit_enemy
+	j check_player_bullet_end
+hit_enemy:
+	jal CLEAR_ENEMY
+deactivate_bullet_collision:
+	sw $zero, 28($s0)
+check_player_bullet_end:
+	j check_player_collision
+
+check_player_collision:
 	# Check for player collision with various objects and respond accordingly
 	lw $t0, 0($s0)
 	
 	li $t1, PURPLE_STONE1
 	li $t2, BLUE_STONE1
-	#li $t3, BLUE_STONE1
-	#li $t4, BLUE_STONE1
-	#li $t5, BLUE_STONE1
-	#li $t6, BLUE_STONE1
-	li $t7, 0x00ff1745	# t7 = enemy color
+
+	li $t7, ENEMY_COL_1	# t7 = enemy color
 	
 	lw $t9, 0($t0)
 	beq $t9, $t1, collect_purple
@@ -669,7 +800,8 @@ check_collision:
 	beq $t9, $t2, collect_blue
 	beq $t9, $t7, enemy_collision
 	
-	j sleep_game_loop
+	# otherwise, no collision
+	j draw_objects
 	
 collect_purple:
 	# Player collected the purple stone so move it to the collected bar
@@ -683,7 +815,7 @@ collect_purple:
 	
 	jal DRAW_STONE
 	
-	j sleep_game_loop
+	j draw_objects
 
 collect_blue:
 	# Player collected the blue stone so move it to the collected bar
@@ -698,7 +830,7 @@ collect_blue:
 	
 	jal DRAW_STONE
 	
-	j sleep_game_loop
+	j draw_objects
 
 enemy_collision:
 	# Collision with enemy drops health by 2 hearts
@@ -708,32 +840,41 @@ enemy_collision:
 	addi $t0, $t0, -2
 	sw $t0, 12($s0)
 	
-	# TODO: Check health and end game if necessary
-	
 	jal CLEAR_HEALTH
 	jal DRAW_HEALTH
 	
+	jal CLEAR_ENEMY
 	
 	# set player hurt indicator to 10 (player will be hurt for 10 cycles)
 	li $t0, 10
 	sw $t0, 16($s0)
 	
+	j check_player_health
+
+check_player_health:
+	# If player has no more health, show game over screen
+	lw $t0, 12($s0)
+	bgtz $t0, draw_objects
+	
+	jal CLEAR
+	jal DRAW_GAME_OVER
+
 	j sleep_game_loop
 
-sleep_game_loop:
+draw_objects:
 	# Draw the player at the current location
 	jal DRAW_PLAYER
 	
+	jal DRAW_PLAYER_BULLET
+	
+	j sleep_game_loop
+
+sleep_game_loop:
 	# Sleep and jump back to start of the main game loop
 	li $v0, 32
 	li $a0, SLEEP_TIME
 	syscall
 	j game_loop
-
-
-END:
-	li $v0, 10 # terminate the program gracefully 
-	syscall 
 
 
 # ------------ Clear the Screen ------------ #
@@ -989,7 +1130,7 @@ DRAW_PLAYER:
 	bne $t5, $zero, draw_player_hurt	# if player hurt, use hurt skin color
 	# otherwise, player not hurt so use normal skin color
 	li $t0, 0x009675cd			# t0 = primary normal player color (skin)
-	j draw_player_end
+	j draw_player_start
 	
 draw_player_hurt:
 	li $t0, 0x00c2185c			# t0 = primary hurt player color (skin)
@@ -997,11 +1138,14 @@ draw_player_hurt:
 	addi $t5, $t5, -1
 	sw $t5, 16($t4)
 
-draw_player_end:	
+draw_player_start:	
 	
 	li $t1, 0x00ffeb3b			# t1 = secondary player color (armour)
 	li $t2, 0x00795548			# t2 = tertiary player color (clothes)
 	li $t3, 0x00ffc107			# t3 = glove color
+	
+	la $t5, Player
+	lw $t5, 20($t5)				# t5 = direction of player
 	
 	lw $t4, 0($t4)				# t4 = top left unit of player hitbox
 	
@@ -1025,6 +1169,9 @@ draw_player_end:
 	sw $t1, 12($t4)
 	sw $t0, 16($t4)
 	addi $t4, $t4, NEXT_ROW_OFFSET
+	
+	beqz $t5, draw_player_left
+draw_player_right:
 	sw $t0, 0($t4)
 	sw $t2, 4($t4)
 	sw $t2, 8($t4)
@@ -1036,6 +1183,20 @@ draw_player_end:
 	sw $t2, 8($t4)
 	sw $t2, 12($t4)
 	sw $t3, 16($t4)
+	j draw_player_end
+draw_player_left:
+	sw $t3, 0($t4)
+	sw $t2, 4($t4)
+	sw $t2, 8($t4)
+	sw $t2, 12($t4)
+	sw $t0, 16($t4)
+	addi $t4, $t4, NEXT_ROW_OFFSET
+	sw $t3, 0($t4)
+	sw $t2, 4($t4)
+	sw $t2, 8($t4)
+	sw $t2, 12($t4)
+	sw $t0, 16($t4)
+draw_player_end:
 	addi $t4, $t4, NEXT_ROW_OFFSET
 	sw $t2, 4($t4)
 	sw $t2, 12($t4)
@@ -1098,15 +1259,44 @@ CLEAR_PLAYER:
 	sw $t0, 12($t1)
 	
 	jr $ra
+	
+# ------------ Draw Player Bullet ------------ #
+DRAW_PLAYER_BULLET:
+	li $t0, 0x00d2baff
+	la $t1, Player
+	
+	lw $t2, 28($t1)
+	beqz $t2, draw_player_bullet_end	# if no active bullet then return
+	
+	lw $t1, 24($t1)		# t1 = current bullet loc
+
+	sw $t0, 0($t1)
+draw_player_bullet_end:
+	jr $ra
+	
+# ------------ CLEAR Player Bullet ------------ #
+CLEAR_PLAYER_BULLET:
+	li $t0, BACKGROUND_COL
+	la $t1, Player
+	
+	lw $t2, 28($t1)
+	beqz $t2, clear_player_bullet_end	# if no active bullet then return
+	
+	lw $t1, 24($t1)		# t1 = current bullet loc
+
+	sw $t0, 0($t1)
+clear_player_bullet_end:
+	jr $ra
 
 	
 # ------------ Draw Enemy Character ------------ #
 DRAW_ENEMY:
-	li $t0, 0x00ff1745	# t0 = primary player color
+	la $t3, Enemies
+	lw $t0, 8($t3)		# t0 = primary player color
 	li $t1, 0x00ffc107	# t1 = secondary player color
 	li $t2, 0x0000bbd4	# t2 = tertiary player color
 	
-	li $t4,	0x10009d08	# t4 = top left unit of enemy hitbox	(x: 10, y: 29)
+	lw $t4,	0($t3)		# t4 = top left unit of enemy hitbox	(x: 10, y: 29)
 	sw $t0, 4($t4)
 	sw $t1, 8($t4)
 	sw $t0, 12($t4)
@@ -1132,7 +1322,41 @@ DRAW_ENEMY:
 	addi $t4, $t4, NEXT_ROW_OFFSET
 	sw $t2, 4($t4)
 	sw $t2, 12($t4)
+draw_enemy_end:
+	jr $ra
 	
+# ------------ Clear Enemy Character ------------ #
+CLEAR_ENEMY:
+	la $t1, Enemies
+	li $t0, BACKGROUND_COL	# t0 = background color
+	
+	lw $t1,	0($t1)		# t1 = top left unit of enemy hitbox
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 0($t1)
+	sw $t0, 4($t1)
+	sw $t0, 8($t1)
+	sw $t0, 12($t1)
+	sw $t0, 16($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 12($t1)
+	addi $t1, $t1, NEXT_ROW_OFFSET
+	sw $t0, 4($t1)
+	sw $t0, 12($t1)
+
 	jr $ra
 
 
@@ -1336,7 +1560,7 @@ lvl1_1:
 	j lvl1_1
 end_lvl1_1:
 
-	# Draw the third platform in level 1
+	# Draw the second platform in level 1
 	li $t1, 0x1000a400	# address of top left corner of 2nd platform (x: 0, y: 36)
 	li $t3, 0		# counter for the platform row
 lvl1_2:
@@ -1377,17 +1601,6 @@ lvl1_2:
 	sw $t0, 132($t1)
 	sw $t0, 136($t1)
 	sw $t0, 140($t1)
-	sw $t0, 144($t1)
-	sw $t0, 148($t1)
-	sw $t0, 152($t1)
-	sw $t0, 156($t1)
-	sw $t0, 160($t1)
-	sw $t0, 164($t1)
-	sw $t0, 168($t1)
-	sw $t0, 172($t1)
-	sw $t0, 176($t1)
-	sw $t0, 180($t1)
-	sw $t0, 184($t1)
 	addi $t1, $t1, NEXT_ROW_OFFSET
 	addi $t3, $t3, 1
 	j lvl1_2
@@ -1447,4 +1660,178 @@ lvl1_3:
 	j lvl1_3
 end_lvl1_3:
 
+	jr $ra
+
+# ------------ Draw Game Over Screen ------------ #
+DRAW_GAME_OVER:
+	li $t0, 0x1000964c
+	li $t1, 0x00ffffff
+	
+	# draw "GAME"
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	sw $t1, 12($t0)
+	sw $t1, 16($t0)
+	sw $t1, 20($t0)
+	sw $t1, 32($t0)
+	sw $t1, 36($t0)
+	sw $t1, 40($t0)
+	sw $t1, 44($t0)
+	sw $t1, 56($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	sw $t1, 88($t0)
+	sw $t1, 92($t0)
+	sw $t1, 96($t0)
+	sw $t1, 100($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 60($t0)
+	sw $t1, 72($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 64($t0)
+	sw $t1, 68($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 12($t0)
+	sw $t1, 16($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 32($t0)
+	sw $t1, 36($t0)
+	sw $t1, 40($t0)
+	sw $t1, 44($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	sw $t1, 88($t0)
+	sw $t1, 92($t0)
+	sw $t1, 96($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	sw $t1, 12($t0)
+	sw $t1, 16($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	sw $t1, 88($t0)
+	sw $t1, 92($t0)
+	sw $t1, 96($t0)
+	sw $t1, 100($t0)
+	
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	
+	# draw "OVER"
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	sw $t1, 12($t0)
+	sw $t1, 16($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 60($t0)
+	sw $t1, 64($t0)
+	sw $t1, 68($t0)
+	sw $t1, 72($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	sw $t1, 88($t0)
+	sw $t1, 92($t0)
+	sw $t1, 96($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 84($t0)
+	sw $t1, 100($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 84($t0)
+	sw $t1, 100($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 60($t0)
+	sw $t1, 64($t0)
+	sw $t1, 68($t0)
+	sw $t1, 72($t0)
+	sw $t1, 84($t0)
+	sw $t1, 88($t0)
+	sw $t1, 92($t0)
+	sw $t1, 96($t0)
+	sw $t1, 100($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 28($t0)
+	sw $t1, 48($t0)
+	sw $t1, 56($t0)
+	sw $t1, 84($t0)
+	sw $t1, 92($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 0($t0)
+	sw $t1, 20($t0)
+	sw $t1, 32($t0)
+	sw $t1, 44($t0)
+	sw $t1, 56($t0)
+	sw $t1, 84($t0)
+	sw $t1, 96($t0)
+	addi $t0, $t0, NEXT_ROW_OFFSET
+	sw $t1, 4($t0)
+	sw $t1, 8($t0)
+	sw $t1, 12($t0)
+	sw $t1, 16($t0)
+	sw $t1, 36($t0)
+	sw $t1, 40($t0)
+	sw $t1, 56($t0)
+	sw $t1, 60($t0)
+	sw $t1, 64($t0)
+	sw $t1, 68($t0)
+	sw $t1, 72($t0)
+	sw $t1, 76($t0)
+	sw $t1, 84($t0)
+	sw $t1, 100($t0)
+	
 	jr $ra
