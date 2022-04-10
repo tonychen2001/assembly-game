@@ -232,7 +232,7 @@ init_game:
 	li $a2, 1
 	jal DRAW_PLATFORM
 	
-	li $a0, 0x1000ae00
+	li $a0, 0x1000af00
 	li $a1, 8
 	li $a2, 1
 	jal DRAW_PLATFORM
